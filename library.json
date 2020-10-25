@@ -1,0 +1,13 @@
+{
+    "name": "Adafruit-BMP3XX-Library",
+    "keywords": "Arduino library for BMP3XX series temperature/pressure sensors",
+    "description": "Arduino library for BMP3XX series temperature/pressure sensors",
+    "authors":
+    {
+        "name": "Adafruit",
+        "email": "info@adafruit.com"
+    },
+    "version": "2.0.0",
+    "frameworks": ["fembed"],
+    "platforms": ["ststm32"]
+}

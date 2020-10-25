@@ -26,12 +26,19 @@
  */
 
 #include "Adafruit_BMP3XX.h"
-#include "Arduino.h"
+#if USE_FEMBED
+std::shared_ptr<FEmbed::I2C> i2c_dev = nullptr;
+std::shared_ptr<FEmbed::SPI> spi_dev = nullptr;
 
+#define BMP_CS_NAME                     "bmpxx_cs"
+uint8_t bmp_addr = 0;
+#else
+#include "Arduino.h"
 //#define BMP3XX_DEBUG
 
 Adafruit_I2CDevice *i2c_dev = NULL; ///< Global I2C interface pointer
 Adafruit_SPIDevice *spi_dev = NULL; ///< Global SPI interface pointer
+#endif
 
 // Our hardware interface functions
 static int8_t i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
@@ -42,6 +49,7 @@ static int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data,
                        uint32_t len, void *intf_ptr);
 static int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data,
                         uint32_t len, void *intf_ptr);
+
 static void delay_usec(uint32_t us, void *intf_ptr);
 static int8_t validate_trimming_param(struct bmp3_dev *dev);
 static int8_t cal_crc(uint8_t seed, uint8_t data);
@@ -60,6 +68,66 @@ Adafruit_BMP3XX::Adafruit_BMP3XX(void) {
   _filterEnabled = _tempOSEnabled = _presOSEnabled = false;
 }
 
+#if USE_FEMBED
+/**************************************************************************/
+/*!
+    @brief Initializes the sensor
+
+    Hardware ss initialized, verifies it is in the I2C or SPI bus, then reads
+    calibration data in preparation for sensor reads.
+
+    @param  i2c parameter for the I2C device we will use.
+    @param  addr Optional parameter for the I2C address of BMP3. Default is 0x77
+   is "Wire"
+    @return True on sensor initialization success. False on failure.
+*/
+/**************************************************************************/
+bool Adafruit_BMP3XX::begin_I2C(std::shared_ptr<FEmbed::I2C> i2c, uint8_t addr) {
+
+  spi_dev = nullptr;
+  i2c_dev = i2c;
+
+  // verify i2c address was found
+  if (!i2c_dev->begin()) {
+    return false;
+  }
+
+  bmp_addr = addr;
+
+  the_sensor.chip_id = addr;
+  the_sensor.intf = BMP3_I2C_INTF;
+  the_sensor.read = &i2c_read;
+  the_sensor.write = &i2c_write;
+  the_sensor.intf_ptr = NULL;
+
+  return _init();
+}
+
+/*!
+ *    @brief  Sets up the hardware and initializes hardware SPI
+ *    @param  cs_pin The arduino pin # connected to chip select
+ *    @param  theSPI The SPI object to be used for SPI connections.
+ *    @return True if initialization was successful, otherwise false.
+ */
+bool Adafruit_BMP3XX::begin_SPI(uint32_t cs,
+                                std::shared_ptr<FEmbed::SPI> spi) {
+
+  i2c_dev = nullptr;
+  spi_dev = spi;
+
+  if (!spi_dev->begin()) {
+    return false;
+  }
+
+  spi->addSelect(BMP_CS_NAME, cs);
+  the_sensor.chip_id = 0;                   // For SPI, just use name to selected
+  the_sensor.intf = BMP3_SPI_INTF;
+  the_sensor.read = &spi_read;
+  the_sensor.write = &spi_write;
+
+  return _init();
+}
+#else
 /**************************************************************************/
 /*!
     @brief Initializes the sensor
@@ -159,6 +227,7 @@ bool Adafruit_BMP3XX::begin_SPI(int8_t cs_pin, int8_t sck_pin, int8_t miso_pin,
 
   return _init();
 }
+#endif
 
 bool Adafruit_BMP3XX::_init(void) {
   the_sensor.delay_us = delay_usec;
@@ -339,7 +408,11 @@ bool Adafruit_BMP3XX::performReading(void) {
   if (rslt != BMP3_OK)
     return false;
 
+#if USE_FEMBED
+  fe_delay(40);
+#else
   delay(40);
+#endif
 
   /* Variable used to store the compensated data */
   struct bmp3_data data;
@@ -471,11 +544,16 @@ bool Adafruit_BMP3XX::setOutputDataRate(uint8_t odr) {
 /**************************************************************************/
 int8_t i2c_read(uint8_t reg_addr, uint8_t *reg_data,
                 uint32_t len, void *intf_ptr) {
+  (void) intf_ptr;
   //Serial.print("I2C read address 0x"); Serial.print(reg_addr, HEX);
   //Serial.print(" len "); Serial.println(len, HEX);
-
+#if USE_FEMBED
+  if(i2c_dev->readMem(bmp_addr, reg_addr, FEmbed::I2CMEMAddr8Bit, reg_data, len))
+      return 1;
+#else
   if (!i2c_dev->write_then_read(&reg_addr, 1, reg_data, len))
     return 1;
+#endif
 
   return 0;
 }
@@ -487,12 +565,19 @@ int8_t i2c_read(uint8_t reg_addr, uint8_t *reg_data,
 /**************************************************************************/
 int8_t i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
                  uint32_t len, void *intf_ptr) {
+  (void) intf_ptr;
   //Serial.print("I2C write address 0x"); Serial.print(reg_addr, HEX);
   //Serial.print(" len "); Serial.println(len, HEX);
-
+#if USE_FEMBED
+  uint8_t reg_cache[16] = {0};
+  for(uint32_t i=0; i< 15 && i< len; i++) reg_cache[i+1] = reg_data[i];
+  reg_cache[0] = reg_addr;
+  if(i2c_dev->write(bmp_addr, reg_cache, len + 1))
+    return 1;
+#else
   if (!i2c_dev->write((uint8_t *)reg_data, len, false, &reg_addr, 1))
     return 1;
-
+#endif
   return 0;
 }
 
@@ -503,9 +588,14 @@ int8_t i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
 /**************************************************************************/
 static int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data,
                        uint32_t len, void *intf_ptr) {
-
+(void) intf_ptr;
   reg_addr |= 0x80;
+#if USE_FEMBED
+  uint8_t reg_cache[2] = {reg_addr, 0x00};
+  spi_dev->readAfterWrite(BMP_CS_NAME, reg_cache, 2, reg_data, len);
+#else
   spi_dev->write_then_read(&reg_addr, 1, reg_data, len, 0x00);
+#endif
   return 0;
 }
 
@@ -516,12 +606,23 @@ static int8_t spi_read(uint8_t reg_addr, uint8_t *reg_data,
 /**************************************************************************/
 static int8_t spi_write(uint8_t reg_addr, const uint8_t *reg_data,
                         uint32_t len, void *intf_ptr) {
+(void) intf_ptr;
+#if USE_FEMBED
+  uint8_t reg_cache[16] = {0};
+  for(uint32_t i=0; i< 15 && i< len; i++) reg_cache[i+1] = reg_data[i];
+  reg_cache[0] = reg_addr;
+  spi_dev->write(BMP_CS_NAME, reg_cache, len + 1);
+#else
   spi_dev->write((uint8_t *)reg_data, len, &reg_addr, 1);
-
+#endif
   return 0;
 }
 
+#if USE_FEMBED
+static void delay_usec(uint32_t us, void *intf_ptr) { fe_delay_us(us); }
+#else
 static void delay_usec(uint32_t us, void *intf_ptr) { delayMicroseconds(us); }
+#endif
 
 static int8_t validate_trimming_param(struct bmp3_dev *dev)
 {

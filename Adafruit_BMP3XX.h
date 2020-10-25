@@ -24,9 +24,12 @@
 
 #include "bmp3.h"
 
+#if USE_FEMBED
+#include <FEmbed.h>
+#else
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_SPIDevice.h>
-
+#endif
 /*=========================================================================
     I2C ADDRESS/BITS
     -----------------------------------------------------------------------*/
@@ -41,12 +44,18 @@
 class Adafruit_BMP3XX {
 public:
   Adafruit_BMP3XX();
-
+#if USE_FEMBED
+  bool begin_I2C(std::shared_ptr<FEmbed::I2C> i2c,
+                 uint8_t addr = BMP3XX_DEFAULT_ADDRESS);
+  bool begin_SPI(uint32_t cs, std::shared_ptr<FEmbed::SPI> spi);
+#else
   bool begin_I2C(uint8_t addr = BMP3XX_DEFAULT_ADDRESS,
                  TwoWire *theWire = &Wire);
   bool begin_SPI(uint8_t cs_pin, SPIClass *theSPI = &SPI);
+
   bool begin_SPI(int8_t cs_pin, int8_t sck_pin, int8_t miso_pin,
                  int8_t mosi_pin);
+#endif
   float readTemperature(void);
   float readPressure(void);
   float readAltitude(float seaLevel);
@@ -70,7 +79,11 @@ private:
   bool _filterEnabled, _tempOSEnabled, _presOSEnabled, _ODREnabled;
   uint8_t _i2caddr;
   int32_t _sensorID;
+#if USE_FEMBED
+
+#else
   int8_t _cs;
+#endif
   unsigned long _meas_end;
 
   uint8_t spixfer(uint8_t x);
