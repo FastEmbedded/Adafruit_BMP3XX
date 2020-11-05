@@ -98,7 +98,7 @@ bool Adafruit_BMP3XX::begin_I2C(std::shared_ptr<FEmbed::I2C> i2c, uint8_t addr) 
   the_sensor.intf = BMP3_I2C_INTF;
   the_sensor.read = &i2c_read;
   the_sensor.write = &i2c_write;
-  the_sensor.intf_ptr = NULL;
+  the_sensor.intf_ptr = i2c.get();
 
   return _init();
 }
@@ -548,14 +548,16 @@ int8_t i2c_read(uint8_t reg_addr, uint8_t *reg_data,
   //Serial.print("I2C read address 0x"); Serial.print(reg_addr, HEX);
   //Serial.print(" len "); Serial.println(len, HEX);
 #if USE_FEMBED
-  if(i2c_dev->readMem(bmp_addr, reg_addr, FEmbed::I2CMEMAddr8Bit, reg_data, len))
-      return 1;
+  if(i2c_dev->readMem(bmp_addr, reg_addr, FEmbed::I2CMEMAddr8Bit, reg_data, len) >= 0)
+  {
+      return 0;
+  }
 #else
   if (!i2c_dev->write_then_read(&reg_addr, 1, reg_data, len))
     return 1;
 #endif
 
-  return 0;
+  return 1;
 }
 
 /**************************************************************************/
@@ -572,13 +574,13 @@ int8_t i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
   uint8_t reg_cache[16] = {0};
   for(uint32_t i=0; i< 15 && i< len; i++) reg_cache[i+1] = reg_data[i];
   reg_cache[0] = reg_addr;
-  if(i2c_dev->write(bmp_addr, reg_cache, len + 1))
-    return 1;
+  if(i2c_dev->write(bmp_addr, reg_cache, len + 1) >= 0)
+    return 0;
 #else
   if (!i2c_dev->write((uint8_t *)reg_data, len, false, &reg_addr, 1))
     return 1;
 #endif
-  return 0;
+  return 1;
 }
 
 /**************************************************************************/
